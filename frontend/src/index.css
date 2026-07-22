@@ -1,0 +1,4 @@
+/* Base reset lives mostly in App.css; keep html defaults minimal. */
+body {
+  margin: 0;
+}
