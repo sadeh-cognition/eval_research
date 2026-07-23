@@ -1,4 +1,4 @@
-"""Shared MIPROv2 optimization used by CLI and API."""
+"""Shared MIPROv2 optimization used by the API."""
 
 from __future__ import annotations
 

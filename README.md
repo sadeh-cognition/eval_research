@@ -42,70 +42,16 @@ The tutorial uses ColBERTv2 over **Wikipedia 2017 abstracts**:
 
 That host is often unreachable. This project:
 
-- probes ColBERT first (`--backend auto`),
+- probes ColBERT first (`backend=auto`),
 - falls back to the public **Wikipedia API** if ColBERT is down.
 
 Fallback changes the retrieval corpus (not 2017 abstracts), so absolute scores may differ from the blog numbers (~8% → ~42%). The **eval + optimize loop** is the same.
 
-Force a backend:
-
-```bash
---backend colbert    # fail if ColBERT is down
---backend wikipedia  # always use Wikipedia API
-```
-
-## Commands
-
-### Demo (one claim)
-
-```bash
-uv run python -m react_hover.run demo \
-  --student-lm openai/gpt-5.4-mini \
-  --claim "David Gregory was born in 1625."
-```
-
-### Baseline evaluation
-
-Official tutorial uses train=100, dev=100, 16 threads. Start smaller to save cost:
-
-```bash
-uv run python -m react_hover.run evaluate \
-  --student-lm openai/gpt-5.4-mini \
-  --dev-size 5 \
-  --train-size 5 \
-  --num-threads 2 \
-  --safe
-# → appends artifacts/evals/<timestamp>_baseline_<model>.json
-```
-
-### Optimize (MIPROv2) + re-evaluate
-
-Tutorial uses `auto="medium"` with GPT-4o as teacher (~30 min / a few USD at full size). Use `light` and small sets first:
-
-```bash
-uv run python -m react_hover.run optimize \
-  --student-lm openai/gpt-5.4-mini \
-  --teacher-lm openai/gpt-5.4 \
-  --train-size 20 \
-  --dev-size 10 \
-  --auto light \
-  --num-threads 4 \
-  --safe \
-  --save artifacts/optimized_react.json
-```
-
-Re-evaluate a saved program:
-
-```bash
-uv run python -m react_hover.run evaluate \
-  --load artifacts/optimized_react.json \
-  --dev-size 10 \
-  --safe
-```
+Force a backend via the UI/API: `colbert` (fail if ColBERT is down) or `wikipedia` (always use Wikipedia API).
 
 ## Eval history + React reviewer
 
-Every `evaluate` / `optimize` run is **appended** to disk (never overwrites prior runs):
+Every evaluate / optimize run is **appended** to disk (never overwrites prior runs):
 
 ```text
 artifacts/evals/
@@ -172,7 +118,6 @@ src/react_hover/
   opt_runner.py   # shared MIPROv2 optimize
   history.py      # disk-backed eval run store
   jobs.py         # background eval/optimize jobs
-  run.py          # CLI: demo | evaluate | optimize
   api.py          # FastAPI for eval history + jobs
 frontend/         # React (Vite + TypeScript) review UI
 artifacts/evals/  # persisted eval history
@@ -181,5 +126,5 @@ artifacts/evals/  # persisted eval history
 ## Notes
 
 - Metric returns continuous recall at eval time; returns `bool` (perfect only) when optimizers pass `trace` — same as the tutorial.
-- `--safe` wraps the agent so a single bad trajectory does not abort the whole eval.
-- Full official sizes: `--train-size 100 --dev-size 100 --auto medium --num-threads 16`.
+- Safe mode wraps the agent so a single bad trajectory does not abort the whole eval.
+- Full official sizes (via UI/API): train=100, dev=100, auto=medium, num_threads=16.

@@ -1,4 +1,4 @@
-"""Shared baseline evaluation used by CLI and API."""
+"""Shared baseline evaluation used by the API."""
 
 from __future__ import annotations
 
