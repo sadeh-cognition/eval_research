@@ -17,7 +17,14 @@ from pydantic import BaseModel, Field
 
 from react_hover.env import load_env, log_credential_status, require_openai_api_key
 from react_hover.eval_runner import AVAILABLE_MODELS, DEFAULT_STUDENT_LM
-from react_hover.history import DEFAULT_EVALS_DIR, import_legacy_results, list_runs, load_run
+from react_hover.history import (
+    DEFAULT_EVALS_DIR,
+    delete_run,
+    import_legacy_results,
+    list_runs,
+    load_run,
+    resolve_run_path,
+)
 from react_hover.jobs import get_job, list_jobs, start_eval_job
 from react_hover.logging_config import configure_logging
 
@@ -145,13 +152,10 @@ def get_runs() -> dict:
 
 @app.get("/api/runs/{run_id}")
 def get_run(run_id: str) -> dict:
-    path = EVALS_ROOT / f"{run_id}.json"
-    if not path.is_file():
-        matches = list(EVALS_ROOT.glob(f"{run_id}.json")) + list(EVALS_ROOT.glob(f"{run_id}_*.json"))
-        if not matches:
-            logger.warning("api.run_not_found run_id={}", run_id)
-            raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
-        path = sorted(matches)[0]
+    path = resolve_run_path(run_id, EVALS_ROOT)
+    if path is None:
+        logger.warning("api.run_not_found run_id={}", run_id)
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
     try:
         record = load_run(path)
     except OSError as exc:
@@ -160,6 +164,20 @@ def get_run(run_id: str) -> dict:
     record["_path"] = str(path)
     logger.debug("api.run_loaded run_id={} score={}", run_id, record.get("score"))
     return record
+
+
+@app.delete("/api/runs/{run_id}")
+def remove_run(run_id: str) -> dict:
+    try:
+        path = delete_run(run_id, EVALS_ROOT)
+    except FileNotFoundError as exc:
+        logger.warning("api.run_delete_not_found run_id={}", run_id)
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OSError as exc:
+        logger.exception("api.run_delete_error run_id={}", run_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    logger.info("api.run_deleted run_id={} path={}", run_id, path)
+    return {"ok": True, "id": run_id, "path": str(path)}
 
 
 @app.get("/api/jobs")

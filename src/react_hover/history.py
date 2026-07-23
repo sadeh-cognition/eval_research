@@ -159,6 +159,29 @@ def load_run(path: Path | str) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def resolve_run_path(run_id: str, root: Path | str | None = None) -> Path | None:
+    """Locate a persisted run file by id. Returns None if missing."""
+    if not run_id or "/" in run_id or "\\" in run_id or ".." in run_id:
+        return None
+    directory = evals_dir(root)
+    path = directory / f"{run_id}.json"
+    if path.is_file():
+        return path
+    matches = list(directory.glob(f"{run_id}.json")) + list(directory.glob(f"{run_id}_*.json"))
+    if not matches:
+        return None
+    return sorted(matches)[0]
+
+
+def delete_run(run_id: str, root: Path | str | None = None) -> Path:
+    """Delete a persisted run file. Raises FileNotFoundError if missing."""
+    path = resolve_run_path(run_id, root)
+    if path is None:
+        raise FileNotFoundError(f"Run not found: {run_id}")
+    path.unlink()
+    return path
+
+
 def list_runs(root: Path | str | None = None) -> list[dict[str, Any]]:
     """Load all runs, newest first. Missing/corrupt files are skipped."""
     directory = evals_dir(root)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { fetchJob, fetchModels, fetchRun, fetchRuns, startEval } from './api'
+import { deleteRun, fetchJob, fetchModels, fetchRun, fetchRuns, startEval } from './api'
 import {
   formatAggregateScore,
   formatExampleScore,
@@ -361,15 +361,21 @@ export default function App() {
   const [exampleIdx, setExampleIdx] = useState(0)
   const [loadingList, setLoadingList] = useState(true)
   const [loadingRun, setLoadingRun] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const loadList = useCallback(async (preferId?: string) => {
+  const loadList = useCallback(async (preferId?: string | null) => {
     setLoadingList(true)
     setError(null)
     try {
       const data = await fetchRuns()
       setRuns(data)
-      setSelectedId((prev) => preferId ?? prev ?? data[0]?.id ?? null)
+      setSelectedId((prev) => {
+        if (preferId === null) return data[0]?.id ?? null
+        if (preferId) return preferId
+        if (prev && data.some((r) => r.id === prev)) return prev
+        return data[0]?.id ?? null
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -387,6 +393,25 @@ export default function App() {
     },
     [loadList],
   )
+
+  async function handleDeleteRun() {
+    if (!selectedId || deleting) return
+    const ok = window.confirm(
+      `Delete eval run "${selectedId}"?\n\nThis permanently removes the file from disk.`,
+    )
+    if (!ok) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await deleteRun(selectedId)
+      setRun(null)
+      await loadList(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   useEffect(() => {
     if (!selectedId) {
@@ -488,6 +513,14 @@ export default function App() {
                   {run.parent_id ? ` · parent ${run.parent_id}` : ''}
                 </p>
               </div>
+              <button
+                type="button"
+                className="btn danger"
+                disabled={deleting}
+                onClick={() => void handleDeleteRun()}
+              >
+                {deleting ? 'Deleting…' : 'Delete run'}
+              </button>
             </header>
 
             <div className="metrics">

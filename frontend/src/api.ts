@@ -26,6 +26,11 @@ export async function fetchRun(runId: string): Promise<EvalRun> {
   return (await res.json()) as EvalRun
 }
 
+export async function deleteRun(runId: string): Promise<void> {
+  const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await readError(res))
+}
+
 export async function fetchModels(): Promise<{ models: ModelOption[]; default: string }> {
   const res = await fetch('/api/models')
   if (!res.ok) throw new Error(await readError(res))

@@ -95,9 +95,27 @@ body,
   margin-top: 0.35rem;
 }
 
+.btn.danger {
+  background: #3a1b1f;
+  border-color: var(--danger);
+  color: #ffd0d4;
+  flex-shrink: 0;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: #4a2228;
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.main-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .run-eval {
