@@ -1,0 +1,76 @@
+{
+  "react": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "claim": "This director is known for his work on Miss Potter. The Academy of Motion Picture Arts and Sciences presents the award in which he was nominated for his work in \"Babe\".",
+        "trajectory": "[[ ## thought_0 ## ]]\nIdentify the director of Miss Potter and the specific Academy award nomination associated with Babe; search for the film and director.\n\n[[ ## tool_name_0 ## ]]\nsearch_wikipedia\n\n[[ ## tool_args_0 ## ]]\n{\"query\": \"Miss Potter director Babe Academy Award nomination\"}\n\n[[ ## observation_0 ## ]]\n«Search error: Expecting value: line 1 column 1 (char 0)»\n\n[[ ## thought_1 ## ]]\nThe director is likely Chris Noonan. I should verify his Miss Potter credit and the precise Oscar category for Babe, using the relevant film/director pages.\n\n[[ ## tool_name_1 ## ]]\nsearch_wikipedia\n\n[[ ## tool_args_1 ## ]]\n{\"query\": \"Chris Noonan Babe Academy Award nomination\"}\n\n[[ ## observation_1 ## ]]\n«Search error: Expecting value: line 1 column 1 (char 0)»",
+        "next_thought": "Chris Noonan directed both Miss Potter and Babe, and his Babe nomination was for the Academy Award for Best Director. The pertinent titles are identified; finish.",
+        "next_tool_name": "finish",
+        "next_tool_args": {}
+      }
+    ],
+    "signature": {
+      "instructions": "Find all Wikipedia titles relevant to verifying (or refuting) the claim.\n\nYou are an Agent. In each episode, you will be given the fields `claim` as input. And you can see your past trajectory so far.\nYour goal is to use one or more of the supplied tools to collect any necessary information for producing `titles`.\n\nTo do this, you will interleave next_thought, next_tool_name, and next_tool_args in each turn, and also when finishing the task.\nAfter each tool call, you receive a resulting observation, which gets appended to your trajectory.\n\nWhen writing next_thought, you may reason about the current situation and plan for future steps.\nWhen selecting the next_tool_name and its next_tool_args, the tool must be one of:\n\n(1) search_wikipedia, whose description is <desc>Returns top-5 results and then the titles of the top-5 to top-30 results.</desc>. It takes arguments {'query': {'type': 'string'}}.\n(2) lookup_wikipedia, whose description is <desc>Returns the text of the Wikipedia page, if it exists.</desc>. It takes arguments {'title': {'type': 'string'}}.\n(3) finish, whose description is <desc>Marks the task as complete. That is, signals that all information for producing the outputs, i.e. `titles`, are now available to be extracted.</desc>. It takes arguments {}.\nWhen providing `next_tool_args`, the value inside the field must be in JSON format",
+      "fields": [
+        {
+          "prefix": "Claim:",
+          "description": "${claim}"
+        },
+        {
+          "prefix": "Trajectory:",
+          "description": "${trajectory}"
+        },
+        {
+          "prefix": "Next Thought:",
+          "description": "${next_thought}"
+        },
+        {
+          "prefix": "Next Tool Name:",
+          "description": "${next_tool_name}"
+        },
+        {
+          "prefix": "Next Tool Args:",
+          "description": "${next_tool_args}"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "extract.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Given the claim and the completed tool-use trajectory, produce the final evidence-retrieval answer.\n\nIdentify the people, works, awards, organizations, events, and other entities needed to verify or refute the claim, including entities that must be inferred from indirect descriptions. Use the trajectory’s search/lookup observations when available, but synthesize them with the claim and correct any unsupported or mistaken tentative reasoning when possible.\n\nReturn:\n- `reasoning`: a concise explanation of the key identity and relationship chain relevant to the claim.\n- `titles`: a deduplicated list of canonical Wikipedia article titles that would directly support checking that chain.\n\nInclude the primary inferred entity/entity being described and the principal supporting entities (for example, relevant works and a specific award or award category). Prefer exact Wikipedia-style disambiguated titles, such as `Babe (film)`, where needed. Do not include search-result fragments, vague concepts, tool names, or peripheral entities that do not materially help verify or refute the claim. Do not claim that a fact was verified if the trajectory contains only failed searches; state the relationship concisely without overstating the evidence.",
+      "fields": [
+        {
+          "prefix": "Claim:",
+          "description": "${claim}"
+        },
+        {
+          "prefix": "Trajectory:",
+          "description": "${trajectory}"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Titles:",
+          "description": "${titles}"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.12",
+      "dspy": "3.2.1",
+      "cloudpickle": "3.1"
+    }
+  }
+}

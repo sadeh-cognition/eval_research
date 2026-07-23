@@ -1,0 +1,37 @@
+{
+  "score": 33.33,
+  "results": [
+    {
+      "claim": "The population of the terminus of a train route in 2011 was 2,416. The Reynella railway station was part of this route.",
+      "gold_titles": [
+        "Willunga railway line",
+        "Willunga, South Australia",
+        "Reynella railway station"
+      ],
+      "pred_titles": [
+        "Reynella",
+        "Reynella railway station",
+        "Demographics of South Australia",
+        "Public transport in Adelaide",
+        "List of railway stations in South Australia"
+      ],
+      "score": 0.3333333333333333
+    },
+    {
+      "claim": "Royler Gracie was a student of the person who also taught Romero Cavalcanti and ran the Gracie Humait\u00e1 school.",
+      "gold_titles": [
+        "Rolls Gracie",
+        "Royler Gracie",
+        "Rodrigo Medeiros"
+      ],
+      "pred_titles": [
+        "Royler Gracie",
+        "Romero Cavalcanti",
+        "Gracie Humait\u00e1",
+        "Gracie Family",
+        "Brazilian Jiu-Jitsu"
+      ],
+      "score": 0.3333333333333333
+    }
+  ]
+}

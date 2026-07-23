@@ -1,0 +1,52 @@
+{
+  "id": "20260723T203613Z_baseline_gpt-5.4-mini",
+  "created_at": "2026-07-23T20:36:13.558969+00:00",
+  "kind": "baseline",
+  "metric": "top5_recall",
+  "score": 33.33,
+  "n_examples": 2,
+  "mean_example_score": 0.3333333333333333,
+  "n_perfect": 0,
+  "n_zero": 0,
+  "config": {
+    "student_lm": "openai/gpt-5.4-mini",
+    "backend": "wikipedia",
+    "imported_from": "/home/mokt/dev/eval_research/artifacts/eval_results.json"
+  },
+  "parent_id": null,
+  "notes": "Imported from /home/mokt/dev/eval_research/artifacts/eval_results.json",
+  "results": [
+    {
+      "claim": "The population of the terminus of a train route in 2011 was 2,416. The Reynella railway station was part of this route.",
+      "gold_titles": [
+        "Willunga railway line",
+        "Willunga, South Australia",
+        "Reynella railway station"
+      ],
+      "pred_titles": [
+        "Reynella",
+        "Reynella railway station",
+        "Demographics of South Australia",
+        "Public transport in Adelaide",
+        "List of railway stations in South Australia"
+      ],
+      "score": 0.3333333333333333
+    },
+    {
+      "claim": "Royler Gracie was a student of the person who also taught Romero Cavalcanti and ran the Gracie Humaitá school.",
+      "gold_titles": [
+        "Rolls Gracie",
+        "Royler Gracie",
+        "Rodrigo Medeiros"
+      ],
+      "pred_titles": [
+        "Royler Gracie",
+        "Romero Cavalcanti",
+        "Gracie Humaitá",
+        "Gracie Family",
+        "Brazilian Jiu-Jitsu"
+      ],
+      "score": 0.3333333333333333
+    }
+  ]
+}

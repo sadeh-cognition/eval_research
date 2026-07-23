@@ -9,9 +9,6 @@ wheels/
 # Virtual environments
 .venv
 
-# Local run outputs
-artifacts/
-
 # Secrets
 .env
 .env.local

@@ -1,0 +1,229 @@
+DSPy ReAct optimization findings
+================================
+Date: 2026-07-24
+Repo: eval_research (HoVer multi-hop ReAct + MIPROv2)
+
+This note captures what DSPy changed during the completed optimize run,
+why the score did not move, and what looks broken vs what does not.
+
+
+1. Completed optimize run
+-------------------------
+Baseline:
+  artifacts/evals/20260723T215116Z_optimize_baseline_gpt-5.6-luna.json
+  score: 66.67%  (n=5, n_perfect=1)
+
+After MIPROv2:
+  artifacts/evals/20260723T220250Z_optimize_after_gpt-5.6-luna.json
+  score: 66.67%  (delta +0.00)
+  parent_id: 20260723T215116Z_optimize_baseline_gpt-5.6-luna
+
+Saved program:
+  artifacts/programs/20260723T220058Z_mipro-light_gpt-5.6-luna.json
+
+Config (from run records):
+  student_lm: openai/gpt-5.6-luna
+  teacher_lm: openai/gpt-5.6-terra
+  backend: wikipedia
+  auto: light
+  train_size: 5
+  dev_size: 5
+  max_iters: 10
+  max_bootstrapped_demos: 3
+  max_labeled_demos: 0
+  num_threads: 4
+  temperature requested: 0.7 (omitted for gpt-5.6; models use default)
+
+
+2. How MIPROv2 optimizes this agent
+-----------------------------------
+ReAct has two LLM stages DSPy can rewrite:
+
+  1) react            — thought / tool / args loop
+  2) extract.predict  — final reasoning + titles from the trajectory
+
+Pipeline in src/react_hover/opt_runner.py:
+  baseline eval on devset
+  → MIPROv2.compile (bare dspy.ReAct, not SafeAgent)
+  → save unique program JSON under artifacts/programs/
+  → post-opt eval on same devset
+
+Metric (src/react_hover/metric.py top5_recall):
+  - eval time: continuous recall in [0, 1], aggregate as percentage
+  - during optimization (trace is set): boolean, perfect recall only
+    (recall >= 1.0), so only fully correct title sets are bootstrapped
+
+With max_labeled_demos=0, only bootstrapped (model-generated) demos
+are used — no gold labeled I/O demos.
+
+
+3. Exactly what changed in the program
+--------------------------------------
+Source of truth: artifacts/programs/20260723T220058Z_mipro-light_gpt-5.6-luna.json
+
+3a. react stage
+  - Instructions: UNCHANGED
+    "Find all Wikipedia titles relevant to verifying (or refuting) the claim."
+    (+ standard agent/tool boilerplate)
+
+  - Demos: 1 bootstrapped few-shot demo added (augmented: true)
+
+  Live prompt shape:
+    baseline: system → user
+    after:    system → user(demo) → assistant(demo) → user(real claim)
+
+  Demo claim (train[0]):
+    "This director is known for his work on Miss Potter. The Academy of
+     Motion Picture Arts and Sciences presents the award in which he was
+     nominated for his work in \"Babe\"."
+
+  Gold titles for that claim:
+    Miss Potter | Academy Award for Best Director | Chris Noonan
+
+  Demo trajectory (pathological):
+    1. search_wikipedia("Miss Potter director Babe Academy Award nomination")
+       → Search error: Expecting value: line 1 column 1 (char 0)
+    2. search_wikipedia("Chris Noonan Babe Academy Award nomination")
+       → Search error: Expecting value: line 1 column 1 (char 0)
+    3. finish, asserting Chris Noonan / Best Director without successful lookups
+
+  This teaches: tools failed → invent answer → finish.
+
+3b. extract.predict stage
+  - Demos: none (demos: [])
+  - Instructions: REWRITTEN by MIPRO (main prompt change)
+
+  Baseline extract objective (one line):
+    Find all Wikipedia titles relevant to verifying (or refuting) the claim.
+
+  Optimized extract objective (summary):
+    Given claim + completed trajectory, produce evidence-retrieval answer.
+    Identify people/works/awards/orgs/events including inferred entities.
+    Use trajectory when available; correct unsupported tentative reasoning.
+    Return reasoning (identity/relationship chain) and titles (deduplicated
+    canonical Wikipedia titles). Prefer disambiguated titles e.g. Babe (film).
+    Do not overclaim verification when trajectory only has failed searches.
+
+
+4. Per-example behavior (same 5 dev claims)
+-------------------------------------------
+[0] Chengiopanax / Amaryllis
+    score 0.67 → 0.67  titles identical
+    gold: Eleutherococcus, Amaryllis, Chengiopanax sciadophylloides
+    pred: Chengiopanax sciadophylloides, Chengiopanax, Amaryllis
+
+[1] Rachel Egglestone-Evans / InStyle
+    score 0.33 → 0.33  titles CHANGED
+    gold: InStyle, Rachel Egglestone-Evans, Vintage Life
+    base pred:  Country & Town House, InStyle
+    after pred: The Resident (magazine), InStyle
+
+[2] Nabokov / Harper Lee
+    score 0.67 → 0.67  titles identical
+    gold: Vladimir Nabokov, Harper Lee, List of To Kill a Mockingbird characters
+    pred: Vladimir Nabokov, Harper Lee, To Kill a Mockingbird
+
+[3] Baboo / Darwin / Lugano
+    score 0.67 → 0.67  titles identical
+    gold: Lugano Airport, Baboo (airline), Darwin Airline
+    pred: Baboo, Darwin Airline, Lugano Airport
+    note: Baboo vs Baboo (airline) exact-match miss
+
+[4] Michael Noonan / Fine Gael
+    score 1.00 → 1.00  titles identical
+    AFTER: early finish with ZERO tools (1 react step → finish → extract)
+    still perfect score from parametric knowledge
+
+LLM calls: baseline 36 total, after 31 total.
+
+
+5. Is there a bug?
+------------------
+5a. What does NOT look like a bug
+  - Optimized program was applied (prompts differ; extract instructions longer)
+  - Same dev set for baseline vs after (linked parent_id)
+  - Score math is correct (mean recall × 100)
+  - program_path in after config matches the saved JSON
+  - Flat Δ=0 is a real “no gain,” not a failed load
+
+5b. What DOES look broken or harmful
+
+  (1) Wikipedia tools failing heavily (strongest red flag)
+      Traces full of:
+        Search error: Expecting value: line 1 column 1 (char 0)
+        page fetch failed: Expecting value: line 1 column 1 (char 0)
+      Cause: wikipedia client getting empty/non-JSON responses
+      (rate limit, block, or flaky network). Intermittent — a later
+      manual probe can succeed.
+
+      tools.py turns exceptions into soft observation strings; the agent
+      continues and the run still “succeeds.” So:
+        - scores can look OK while retrieval is mostly dead
+        - MIPRO bootstraps on garbage trajectories
+      num_threads=4 during compile increases rate-limit risk.
+
+  (2) Metric accepts tool-free / failed-tool “perfect” traces
+      top5_recall only checks gold titles ⊆ pred.titles[:5].
+      It does not require successful search/lookup.
+      Extract can guess gold titles from model knowledge → bootstrap win
+      even when every tool call failed. That is how the Miss Potter demo
+      got into the program.
+
+  (3) Bad demo teaches the wrong policy
+      Few-shot example on every react call shows failed searches then finish.
+      After-run example [4] finishes immediately without tools and still
+      scores 1.0 — multi-hop retrieval in name only.
+
+  (4) Exact title match + corpus mismatch
+      HoVer gold titles come from wiki17-style abstracts (tutorial ColBERT
+      index). This run used live Wikipedia API. Near-miss losses:
+        Baboo (airline) vs Baboo
+        Eleutherococcus often missing
+        List of To Kill a Mockingbird characters vs To Kill a Mockingbird
+      Documented in README; still hurts interpretability of “66%.”
+
+  (5) Optimization budget too small for signal (not a code bug)
+      train_size=5, dev_size=5, auto=light, max_labeled_demos=0,
+      perfect-only metric during opt. Flat scores are easy even when
+      prompts change.
+
+
+6. Bottom-line table
+--------------------
+Hypothesis                                         Verdict
+-------------------------------------------------  -------------------------
+Optimized program not applied                      Unlikely
+After score miscomputed / wrong baseline           Unlikely
+Tools/infra poisoning opt + eval                   Yes — strong evidence
+Metric accepts failed-tool perfect traces          Yes — by design, harmful
+Bad demo teaches wrong policy                      Yes — consequence of above
+DSPy “fake” / no real optimization                 No
+
+
+7. Why 66.67 → 66.67 is expected here
+-------------------------------------
+- Retrieval was flaky during both baseline and after.
+- Model often compensates with parametric knowledge (especially example 4).
+- Only one weak bootstrapped demo + extract instruction rewrite.
+- 5-example dev set; 4/5 title lists identical before/after.
+- Nothing suggests the optimize path failed to save or reload the program.
+
+
+8. Useful file map
+------------------
+src/react_hover/opt_runner.py   MIPROv2 baseline → compile → after
+src/react_hover/agent.py        ReAct builder + SafeAgent
+src/react_hover/metric.py       top5_recall
+src/react_hover/tools.py        ColBERT / Wikipedia backends
+src/react_hover/data.py         HoVer load + train/dev split (seed=0)
+artifacts/programs/*.json       saved optimized programs
+artifacts/evals/*.json          per-run scores, trajectories, llm_calls
+
+
+9. Possible follow-ups (not done)
+---------------------------------
+- Harden Wikipedia backend: retries, backoff, hard-fail when search is down
+- Per-run tool success rate diagnostic; flag demos with failed observations
+- Re-run optimize only after tools look healthy
+- Larger train/dev, auto=medium, consider max_labeled_demos > 0
+- Prefer ColBERT wiki17 backend when reachable (matches HoVer gold corpus)
