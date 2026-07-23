@@ -9,6 +9,7 @@ dependencies = [
     "dspy>=3.2.1",
     "fastapi>=0.139.2",
     "loguru>=0.7.3",
+    "optuna>=4.0.0",
     "python-dotenv>=1.2.2",
     "uvicorn>=0.51.0",
     "wikipedia>=1.4.0",

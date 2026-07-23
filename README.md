@@ -88,6 +88,7 @@ Open http://localhost:5173
 - **Evaluate / Optimize** tabs: baseline eval or MIPROv2 (student + teacher, `auto` budget)
 - Sidebar history of all persisted runs (auto-refreshes when a UI job finishes)
 - Optimize jobs write linked `optimize_baseline` + `optimize_after` runs (with Δ and program path)
+- Optimized programs are saved as unique files under `artifacts/programs/` (never overwritten)
 - Aggregate metrics + config
 - Filter examples (all / perfect / partial / failed)
 - Drill into gold vs predicted titles, reasoning, trajectory
@@ -120,7 +121,8 @@ src/react_hover/
   jobs.py         # background eval/optimize jobs
   api.py          # FastAPI for eval history + jobs
 frontend/         # React (Vite + TypeScript) review UI
-artifacts/evals/  # persisted eval history
+artifacts/evals/     # persisted eval history
+artifacts/programs/  # unique optimized program JSON files
 ```
 
 ## Notes

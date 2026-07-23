@@ -12,7 +12,7 @@ from react_hover.agent import SafeAgent, build_react_agent
 from react_hover.data import load_hover
 from react_hover.env import load_env, require_openai_api_key
 from react_hover.eval_runner import evaluate_with_lm_traces
-from react_hover.history import build_run_record, save_run
+from react_hover.history import build_run_record, make_run_id, save_run
 from react_hover.lm import build_lm
 from react_hover.metric import top5_recall
 from react_hover.tools import configure_backend
@@ -20,7 +20,42 @@ from react_hover.tools import configure_backend
 AutoLevel = Literal["light", "medium", "heavy"]
 
 DEFAULT_TEACHER_LM = "openai/gpt-5.4"
-DEFAULT_PROGRAM_PATH = "artifacts/optimized_react.json"
+# Directory for unique program saves (never a single overwriteable file).
+DEFAULT_PROGRAMS_DIR = "artifacts/programs"
+# Back-compat alias used by API docs / older callers.
+DEFAULT_PROGRAM_PATH = DEFAULT_PROGRAMS_DIR
+
+
+def resolve_program_save_path(
+    save: str | None,
+    *,
+    student_lm: str,
+    auto: str,
+) -> Path:
+    """Pick a program path that does not overwrite an existing file.
+
+    - ``None`` / empty → ``artifacts/programs/<timestamp>_mipro_<auto>_<model>.json``
+    - directory path → unique file inside that directory
+    - file path that already exists → ``stem_1.json``, ``stem_2.json``, …
+    """
+    if save is None or not str(save).strip():
+        name = make_run_id(kind=f"mipro-{auto}", student_lm=student_lm) + ".json"
+        path = Path(DEFAULT_PROGRAMS_DIR) / name
+    else:
+        path = Path(save)
+        if path.suffix.lower() != ".json":
+            # Treat as directory when no .json suffix.
+            name = make_run_id(kind=f"mipro-{auto}", student_lm=student_lm) + ".json"
+            path = path / name
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        stem, suffix = path.stem, path.suffix or ".json"
+        n = 1
+        while path.exists():
+            path = path.with_name(f"{stem}_{n}{suffix}")
+            n += 1
+    return path
 
 
 def run_miprov2_optimize(
@@ -38,14 +73,16 @@ def run_miprov2_optimize(
     auto: AutoLevel = "light",
     max_bootstrapped_demos: int = 3,
     max_labeled_demos: int = 0,
-    save: str = DEFAULT_PROGRAM_PATH,
+    save: str | None = None,
     notes: str | None = None,
     job_id: str | None = None,
 ) -> dict[str, Any]:
     """Baseline eval → MIPROv2 compile → save program → post-opt eval.
 
     Persists two history runs (``optimize_baseline`` and ``optimize_after``)
-    linked by ``parent_id``. Returns both records, scores, and program path.
+    linked by ``parent_id``. The compiled program is always written to a
+    unique path under ``artifacts/programs/`` (or a non-colliding variant of
+    ``save``). Returns both records, scores, and program path.
     """
     load_env()
     require_openai_api_key()
@@ -153,10 +190,9 @@ def run_miprov2_optimize(
     )
     logger.info("{}opt.miprov2_compile_done", tag)
 
-    save_path = Path(save)
-    save_path.parent.mkdir(parents=True, exist_ok=True)
+    save_path = resolve_program_save_path(save, student_lm=student_lm, auto=auto)
     optimized.save(str(save_path))
-    logger.info("{}opt.program_saved path={}", tag, save_path)
+    logger.info("{}opt.program_saved path={} (unique, no overwrite)", tag, save_path)
 
     # --- post-opt eval ---
     opt_program = SafeAgent(optimized) if safe else optimized

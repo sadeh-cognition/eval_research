@@ -27,7 +27,7 @@ from react_hover.history import (
 )
 from react_hover.jobs import get_job, list_jobs, start_eval_job, start_optimize_job
 from react_hover.logging_config import configure_logging
-from react_hover.opt_runner import DEFAULT_PROGRAM_PATH, DEFAULT_TEACHER_LM
+from react_hover.opt_runner import DEFAULT_PROGRAMS_DIR, DEFAULT_TEACHER_LM
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVALS_ROOT = REPO_ROOT / DEFAULT_EVALS_DIR
@@ -64,9 +64,12 @@ class StartOptimizeRequest(BaseModel):
     auto: AutoLevel = "light"
     max_bootstrapped_demos: int = Field(3, ge=0, le=16)
     max_labeled_demos: int = Field(0, ge=0, le=16)
-    save: str = Field(
-        DEFAULT_PROGRAM_PATH,
-        description="Where to write the optimized program JSON",
+    save: str | None = Field(
+        None,
+        description=(
+            "Optional program path or directory. Default: unique file under "
+            f"{DEFAULT_PROGRAMS_DIR}/. Existing files are never overwritten."
+        ),
     )
 
 def _ensure_legacy_import() -> None:
@@ -298,12 +301,16 @@ def start_optimize(body: StartOptimizeRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Keep program saves under the repo (no path traversal).
-    save_path = Path(body.save)
-    if save_path.is_absolute() or ".." in save_path.parts:
-        raise HTTPException(
-            status_code=400,
-            detail="save must be a relative path without '..' (e.g. artifacts/optimized_react.json)",
-        )
+    if body.save is not None:
+        save_path = Path(body.save)
+        if save_path.is_absolute() or ".." in save_path.parts:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "save must be a relative path without '..' "
+                    f"(e.g. {DEFAULT_PROGRAMS_DIR}/ or leave unset for auto)"
+                ),
+            )
 
     logger.info(
         "api.optimize_request student={} teacher={} backend={} auto={} "
