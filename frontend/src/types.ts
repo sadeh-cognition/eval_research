@@ -11,8 +11,14 @@ export type RunSummary = {
   parent_id?: string | null
   notes?: string | null
   student_lm?: string | null
+  teacher_lm?: string | null
   backend?: string | null
   dev_size?: number | null
+  train_size?: number | null
+  auto?: string | null
+  program_path?: string | null
+  delta?: number | null
+  baseline_score?: number | null
   path?: string | null
 }
 
@@ -68,25 +74,52 @@ export type ModelOption = {
   label: string
 }
 
+export type JobKind = 'eval' | 'optimize'
+
 export type EvalJob = {
   id: string
+  kind?: JobKind
   status: 'queued' | 'running' | 'succeeded' | 'failed'
   created_at: string
   updated_at: string
   params: Record<string, unknown>
   error?: string | null
   run_id?: string | null
+  baseline_run_id?: string | null
+  run_ids?: string[]
   score?: number | null
+  baseline_score?: number | null
+  delta?: number | null
   path?: string | null
+  program_path?: string | null
 }
+
+export type BackendName = 'auto' | 'colbert' | 'wikipedia'
+export type AutoLevel = 'light' | 'medium' | 'heavy'
 
 export type StartEvalPayload = {
   student_lm: string
-  backend: 'auto' | 'colbert' | 'wikipedia'
+  backend: BackendName
   train_size: number
   dev_size: number
   max_iters: number
   num_threads: number
   safe: boolean
   temperature: number
+}
+
+export type StartOptimizePayload = {
+  student_lm: string
+  teacher_lm: string
+  backend: BackendName
+  train_size: number
+  dev_size: number
+  max_iters: number
+  num_threads: number
+  safe: boolean
+  temperature: number
+  auto: AutoLevel
+  max_bootstrapped_demos: number
+  max_labeled_demos: number
+  save?: string
 }

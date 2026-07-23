@@ -1,4 +1,11 @@
-import type { EvalJob, EvalRun, ModelOption, RunSummary, StartEvalPayload } from './types'
+import type {
+  EvalJob,
+  EvalRun,
+  ModelOption,
+  RunSummary,
+  StartEvalPayload,
+  StartOptimizePayload,
+} from './types'
 
 async function readError(res: Response): Promise<string> {
   try {
@@ -31,14 +38,33 @@ export async function deleteRun(runId: string): Promise<void> {
   if (!res.ok) throw new Error(await readError(res))
 }
 
-export async function fetchModels(): Promise<{ models: ModelOption[]; default: string }> {
+export async function fetchModels(): Promise<{
+  models: ModelOption[]
+  default: string
+  default_teacher?: string
+}> {
   const res = await fetch('/api/models')
   if (!res.ok) throw new Error(await readError(res))
-  return (await res.json()) as { models: ModelOption[]; default: string }
+  return (await res.json()) as {
+    models: ModelOption[]
+    default: string
+    default_teacher?: string
+  }
 }
 
 export async function startEval(payload: StartEvalPayload): Promise<EvalJob> {
   const res = await fetch('/api/evals', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const data = (await res.json()) as { job: EvalJob }
+  return data.job
+}
+
+export async function startOptimize(payload: StartOptimizePayload): Promise<EvalJob> {
+  const res = await fetch('/api/optimize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

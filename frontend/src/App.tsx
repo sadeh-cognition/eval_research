@@ -1,12 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { deleteRun, fetchJob, fetchModels, fetchRun, fetchRuns, startEval } from './api'
+import {
+  deleteRun,
+  fetchJob,
+  fetchModels,
+  fetchRun,
+  fetchRuns,
+  startEval,
+  startOptimize,
+} from './api'
 import {
   formatAggregateScore,
+  formatDelta,
   formatExampleScore,
   formatTime,
+  kindBadgeClass,
+  kindLabel,
   scoreClass,
 } from './format'
 import type {
+  AutoLevel,
+  BackendName,
   EvalJob,
   EvalRun,
   ExampleResult,
@@ -14,6 +27,7 @@ import type {
   ModelOption,
   RunSummary,
   StartEvalPayload,
+  StartOptimizePayload,
 } from './types'
 import './App.css'
 
@@ -181,17 +195,70 @@ function ExampleDetail({ index, row }: { index: number; row: ExampleResult }) {
   )
 }
 
-function RunEvalPanel({
+type PanelMode = 'eval' | 'optimize'
+
+function JobStatusCard({ job }: { job: EvalJob }) {
+  return (
+    <div className={`job-status status-${job.status}`}>
+      <div>
+        <strong>{job.kind === 'optimize' ? 'Optimize' : 'Eval'}</strong>{' '}
+        <code>{job.id}</code> · <span className="badge">{job.status}</span>
+      </div>
+      {job.status === 'succeeded' ? (
+        <div className="muted small">
+          {job.kind === 'optimize' && job.baseline_score != null ? (
+            <>
+              Baseline {formatAggregateScore(job.baseline_score)} → after{' '}
+              {formatAggregateScore(job.score ?? null)} ({formatDelta(job.delta)})
+              {job.program_path ? (
+                <>
+                  {' '}
+                  · program <code>{job.program_path}</code>
+                </>
+              ) : null}
+              <br />
+            </>
+          ) : (
+            <>Score {formatAggregateScore(job.score ?? null)} · </>
+          )}
+          run <code>{job.run_id}</code>
+          {job.baseline_run_id ? (
+            <>
+              {' '}
+              · baseline <code>{job.baseline_run_id}</code>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+      {job.status === 'failed' && job.error ? (
+        <pre className="block error-block">{job.error}</pre>
+      ) : null}
+      {(job.status === 'queued' || job.status === 'running') && (
+        <p className="muted small">
+          {job.kind === 'optimize'
+            ? 'MIPROv2 can take a long time (baseline → compile → re-eval). Polling every 2s…'
+            : 'Polling every 2s… keep this tab open.'}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function RunJobsPanel({
   onCompleted,
 }: {
   onCompleted: (runId: string) => void
 }) {
+  const [mode, setMode] = useState<PanelMode>('eval')
   const [models, setModels] = useState<ModelOption[]>([])
   const [studentLm, setStudentLm] = useState('openai/gpt-5.4-mini')
-  const [backend, setBackend] = useState<StartEvalPayload['backend']>('wikipedia')
+  const [teacherLm, setTeacherLm] = useState('openai/gpt-5.4')
+  const [backend, setBackend] = useState<BackendName>('wikipedia')
   const [devSize, setDevSize] = useState(5)
   const [trainSize, setTrainSize] = useState(5)
   const [maxIters, setMaxIters] = useState(10)
+  const [auto, setAuto] = useState<AutoLevel>('light')
+  const [maxBootstrapped, setMaxBootstrapped] = useState(3)
   const [submitting, setSubmitting] = useState(false)
   const [job, setJob] = useState<EvalJob | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -201,6 +268,12 @@ function RunEvalPanel({
       .then((data) => {
         setModels(data.models)
         setStudentLm(data.default || data.models[0]?.id || 'openai/gpt-5.4-mini')
+        setTeacherLm(
+          data.default_teacher ||
+            data.models.find((m) => m.id === 'openai/gpt-5.4')?.id ||
+            data.default ||
+            'openai/gpt-5.4',
+        )
       })
       .catch((e: unknown) => {
         setFormError(e instanceof Error ? e.message : String(e))
@@ -227,23 +300,53 @@ function RunEvalPanel({
 
   const busy = submitting || job?.status === 'queued' || job?.status === 'running'
 
+  function switchMode(next: PanelMode) {
+    if (busy) return
+    setMode(next)
+    setFormError(null)
+    // Sensible size defaults per mode (cheap eval vs opt with train).
+    if (next === 'optimize') {
+      setTrainSize((n) => (n < 10 ? 20 : n))
+      setDevSize((n) => (n < 5 ? 10 : n))
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setFormError(null)
     setSubmitting(true)
     try {
-      const payload: StartEvalPayload = {
-        student_lm: studentLm,
-        backend,
-        train_size: trainSize,
-        dev_size: devSize,
-        max_iters: maxIters,
-        num_threads: 2,
-        safe: true,
-        temperature: 0.7,
+      if (mode === 'optimize') {
+        const payload: StartOptimizePayload = {
+          student_lm: studentLm,
+          teacher_lm: teacherLm,
+          backend,
+          train_size: trainSize,
+          dev_size: devSize,
+          max_iters: maxIters,
+          num_threads: 4,
+          safe: true,
+          temperature: 0.7,
+          auto,
+          max_bootstrapped_demos: maxBootstrapped,
+          max_labeled_demos: 0,
+        }
+        const started = await startOptimize(payload)
+        setJob(started)
+      } else {
+        const payload: StartEvalPayload = {
+          student_lm: studentLm,
+          backend,
+          train_size: trainSize,
+          dev_size: devSize,
+          max_iters: maxIters,
+          num_threads: 2,
+          safe: true,
+          temperature: 0.7,
+        }
+        const started = await startEval(payload)
+        setJob(started)
       }
-      const started = await startEval(payload)
-      setJob(started)
     } catch (err) {
       setFormError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -253,13 +356,43 @@ function RunEvalPanel({
 
   return (
     <section className="run-eval">
-      <h3>Run evaluation</h3>
+      <div className="panel-tabs">
+        <button
+          type="button"
+          className={mode === 'eval' ? 'chip active' : 'chip'}
+          disabled={busy && mode !== 'eval'}
+          onClick={() => switchMode('eval')}
+        >
+          Evaluate
+        </button>
+        <button
+          type="button"
+          className={mode === 'optimize' ? 'chip active' : 'chip'}
+          disabled={busy && mode !== 'optimize'}
+          onClick={() => switchMode('optimize')}
+        >
+          Optimize
+        </button>
+      </div>
+
+      <h3>{mode === 'optimize' ? 'Run MIPROv2' : 'Run evaluation'}</h3>
       <p className="muted small">
-        Starts a HoVer <code>top5_recall</code> eval and appends results to disk history.
+        {mode === 'optimize' ? (
+          <>
+            Baseline eval → MIPROv2 prompt compile → re-eval. Saves{' '}
+            <code>optimize_baseline</code> + <code>optimize_after</code> runs and the program JSON.
+            Costs money/time — start with <code>light</code> and small sizes.
+          </>
+        ) : (
+          <>
+            Starts a HoVer <code>top5_recall</code> eval and appends results to disk history.
+          </>
+        )}
       </p>
+
       <form className="run-form" onSubmit={(e) => void handleSubmit(e)}>
         <label className="field">
-          <span>Model</span>
+          <span>{mode === 'optimize' ? 'Student model' : 'Model'}</span>
           <select
             value={studentLm}
             onChange={(e) => setStudentLm(e.target.value)}
@@ -274,11 +407,29 @@ function RunEvalPanel({
           </select>
         </label>
 
+        {mode === 'optimize' ? (
+          <label className="field">
+            <span>Teacher model</span>
+            <select
+              value={teacherLm}
+              onChange={(e) => setTeacherLm(e.target.value)}
+              disabled={busy || models.length === 0}
+              required
+            >
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} ({m.id})
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
         <label className="field">
           <span>Search backend</span>
           <select
             value={backend}
-            onChange={(e) => setBackend(e.target.value as StartEvalPayload['backend'])}
+            onChange={(e) => setBackend(e.target.value as BackendName)}
             disabled={busy}
           >
             <option value="wikipedia">wikipedia</option>
@@ -323,36 +474,50 @@ function RunEvalPanel({
           </label>
         </div>
 
+        {mode === 'optimize' ? (
+          <div className="field-row">
+            <label className="field">
+              <span>MIPRO auto</span>
+              <select
+                value={auto}
+                onChange={(e) => setAuto(e.target.value as AutoLevel)}
+                disabled={busy}
+              >
+                <option value="light">light</option>
+                <option value="medium">medium</option>
+                <option value="heavy">heavy</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Bootstrapped demos</span>
+              <input
+                type="number"
+                min={0}
+                max={16}
+                value={maxBootstrapped}
+                disabled={busy}
+                onChange={(e) => setMaxBootstrapped(Number(e.target.value))}
+              />
+            </label>
+          </div>
+        ) : null}
+
         <button type="submit" className="btn primary" disabled={busy || !studentLm}>
-          {busy ? 'Running…' : 'Start eval'}
+          {busy
+            ? mode === 'optimize'
+              ? 'Optimizing…'
+              : 'Running…'
+            : mode === 'optimize'
+              ? 'Start MIPROv2'
+              : 'Start eval'}
         </button>
       </form>
 
       {formError ? <div className="error">{formError}</div> : null}
-
-      {job ? (
-        <div className={`job-status status-${job.status}`}>
-          <div>
-            <strong>Job</strong> <code>{job.id}</code> · <span className="badge">{job.status}</span>
-          </div>
-          {job.status === 'succeeded' ? (
-            <div className="muted small">
-              Score {formatAggregateScore(job.score ?? null)} · run{' '}
-              <code>{job.run_id}</code>
-            </div>
-          ) : null}
-          {job.status === 'failed' && job.error ? (
-            <pre className="block error-block">{job.error}</pre>
-          ) : null}
-          {(job.status === 'queued' || job.status === 'running') && (
-            <p className="muted small">Polling every 2s… keep this tab open.</p>
-          )}
-        </div>
-      ) : null}
+      {job ? <JobStatusCard job={job} /> : null}
     </section>
   )
 }
-
 export default function App() {
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -469,11 +634,11 @@ export default function App() {
         </div>
         <p className="muted small">Persisted runs under artifacts/evals</p>
 
-        <RunEvalPanel onCompleted={handleEvalCompleted} />
+        <RunJobsPanel onCompleted={handleEvalCompleted} />
 
         {loadingList ? <p className="muted">Loading…</p> : null}
         {!loadingList && runs.length === 0 ? (
-          <p className="muted">No runs yet. Start an eval above.</p>
+          <p className="muted">No runs yet. Start an eval or optimize above.</p>
         ) : null}
         <ul className="run-list">
           {runs.map((r) => (
@@ -485,12 +650,21 @@ export default function App() {
               >
                 <div className="run-item-top">
                   <span className={scoreClass(r.score)}>{formatAggregateScore(r.score)}</span>
-                  <span className="badge">{r.kind}</span>
+                  <span className={kindBadgeClass(r.kind)}>{kindLabel(r.kind)}</span>
                 </div>
                 <div className="run-item-meta">{formatTime(r.created_at)}</div>
                 <div className="run-item-meta">
                   n={r.n_examples} · {r.student_lm ?? '?'}
+                  {r.teacher_lm ? ` · teacher ${r.teacher_lm.split('/').pop()}` : ''}
                 </div>
+                {r.delta != null ? (
+                  <div className="run-item-meta">
+                    Δ {formatDelta(r.delta)}
+                    {r.auto ? ` · ${r.auto}` : ''}
+                  </div>
+                ) : r.auto ? (
+                  <div className="run-item-meta">auto={r.auto}</div>
+                ) : null}
               </button>
             </li>
           ))}
@@ -509,8 +683,22 @@ export default function App() {
               <div>
                 <h2>{run.id}</h2>
                 <p className="muted">
-                  {formatTime(run.created_at)} · metric {run.metric ?? 'top5_recall'}
-                  {run.parent_id ? ` · parent ${run.parent_id}` : ''}
+                  {formatTime(run.created_at)} ·{' '}
+                  <span className={kindBadgeClass(run.kind)}>{kindLabel(run.kind)}</span>
+                  {' · '}
+                  metric {run.metric ?? 'top5_recall'}
+                  {run.parent_id ? (
+                    <>
+                      {' · parent '}
+                      <button
+                        type="button"
+                        className="linkish"
+                        onClick={() => setSelectedId(run.parent_id ?? null)}
+                      >
+                        {run.parent_id}
+                      </button>
+                    </>
+                  ) : null}
                 </p>
               </div>
               <button
@@ -542,15 +730,59 @@ export default function App() {
                 <div className="metric-label">Zero</div>
                 <div className="metric-value">{run.n_zero ?? '—'}</div>
               </div>
+              {typeof run.config?.delta === 'number' ? (
+                <div className="metric">
+                  <div className="metric-label">Δ vs baseline</div>
+                  <div
+                    className={`metric-value ${
+                      (run.config.delta as number) > 0
+                        ? 'score-good'
+                        : (run.config.delta as number) < 0
+                          ? 'score-zero'
+                          : 'score-muted'
+                    }`}
+                  >
+                    {formatDelta(run.config.delta as number)}
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             {run.notes ? <p className="notes">{run.notes}</p> : null}
+
+            {(run.config?.teacher_lm ||
+              run.config?.program_path ||
+              run.config?.auto ||
+              run.config?.baseline_score != null) && (
+              <div className="opt-meta">
+                {run.config?.teacher_lm ? (
+                  <span>
+                    Teacher <code>{String(run.config.teacher_lm)}</code>
+                  </span>
+                ) : null}
+                {run.config?.auto ? (
+                  <span>
+                    MIPRO <code>{String(run.config.auto)}</code>
+                  </span>
+                ) : null}
+                {run.config?.baseline_score != null ? (
+                  <span>
+                    Baseline score{' '}
+                    <code>{formatAggregateScore(Number(run.config.baseline_score))}</code>
+                  </span>
+                ) : null}
+                {run.config?.program_path ? (
+                  <span>
+                    Program <code>{String(run.config.program_path)}</code>
+                  </span>
+                ) : null}
+              </div>
+            )}
 
             <details className="config">
               <summary>Config</summary>
               <pre className="block">{JSON.stringify(run.config ?? {}, null, 2)}</pre>
             </details>
-
             <section className="examples">
               <div className="examples-head">
                 <h3>Examples</h3>

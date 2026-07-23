@@ -25,14 +25,16 @@ from react_hover.history import (
     load_run,
     resolve_run_path,
 )
-from react_hover.jobs import get_job, list_jobs, start_eval_job
+from react_hover.jobs import get_job, list_jobs, start_eval_job, start_optimize_job
 from react_hover.logging_config import configure_logging
+from react_hover.opt_runner import DEFAULT_PROGRAM_PATH, DEFAULT_TEACHER_LM
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVALS_ROOT = REPO_ROOT / DEFAULT_EVALS_DIR
 LEGACY_RESULTS = REPO_ROOT / "artifacts" / "eval_results.json"
 
 BackendName = Literal["auto", "colbert", "wikipedia"]
+AutoLevel = Literal["light", "medium", "heavy"]
 
 
 class StartEvalRequest(BaseModel):
@@ -45,6 +47,27 @@ class StartEvalRequest(BaseModel):
     safe: bool = True
     temperature: float = Field(0.7, ge=0.0, le=2.0)
 
+
+class StartOptimizeRequest(BaseModel):
+    student_lm: str = Field(..., description="Student LM to optimize")
+    teacher_lm: str = Field(
+        DEFAULT_TEACHER_LM,
+        description="Teacher / prompt model for MIPROv2",
+    )
+    backend: BackendName = "wikipedia"
+    train_size: int = Field(20, ge=1, le=200)
+    dev_size: int = Field(10, ge=1, le=200)
+    max_iters: int = Field(10, ge=1, le=30)
+    num_threads: int = Field(4, ge=1, le=32)
+    safe: bool = True
+    temperature: float = Field(0.7, ge=0.0, le=2.0)
+    auto: AutoLevel = "light"
+    max_bootstrapped_demos: int = Field(3, ge=0, le=16)
+    max_labeled_demos: int = Field(0, ge=0, le=16)
+    save: str = Field(
+        DEFAULT_PROGRAM_PATH,
+        description="Where to write the optimized program JSON",
+    )
 
 def _ensure_legacy_import() -> None:
     if LEGACY_RESULTS.is_file():
@@ -76,11 +99,25 @@ def _summarize(run: dict) -> dict:
         "parent_id": run.get("parent_id"),
         "notes": run.get("notes"),
         "student_lm": config.get("student_lm"),
+        "teacher_lm": config.get("teacher_lm"),
         "backend": config.get("backend"),
         "dev_size": config.get("dev_size"),
+        "train_size": config.get("train_size"),
+        "auto": config.get("auto"),
+        "program_path": config.get("program_path"),
+        "delta": config.get("delta"),
+        "baseline_score": config.get("baseline_score"),
         "path": run.get("_path"),
     }
 
+
+def _validate_model(model_id: str, *, field_name: str = "model") -> None:
+    known_ids = {m["id"] for m in AVAILABLE_MODELS}
+    if model_id not in known_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown {field_name} {model_id!r}. Choose from GET /api/models.",
+        )
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -117,7 +154,11 @@ async def log_requests(request: Request, call_next):
     path = request.url.path
     logger.debug("api.request method={} path={}", request.method, path)
     response = await call_next(request)
-    if path.startswith("/api/evals") or path.startswith("/api/jobs"):
+    if (
+        path.startswith("/api/evals")
+        or path.startswith("/api/optimize")
+        or path.startswith("/api/jobs")
+    ):
         logger.info(
             "api.response method={} path={} status={}",
             request.method,
@@ -140,8 +181,12 @@ def health() -> dict:
 
 @app.get("/api/models")
 def get_models() -> dict:
-    return {"models": AVAILABLE_MODELS, "default": DEFAULT_STUDENT_LM, "provider": "openai"}
-
+    return {
+        "models": AVAILABLE_MODELS,
+        "default": DEFAULT_STUDENT_LM,
+        "default_teacher": DEFAULT_TEACHER_LM,
+        "provider": "openai",
+    }
 
 @app.get("/api/runs")
 def get_runs() -> dict:
@@ -197,13 +242,11 @@ def get_job_status(job_id: str) -> dict:
 
 @app.post("/api/evals", status_code=202)
 def start_eval(body: StartEvalRequest) -> dict:
-    known_ids = {m["id"] for m in AVAILABLE_MODELS}
-    if body.student_lm not in known_ids:
+    try:
+        _validate_model(body.student_lm, field_name="student_lm")
+    except HTTPException:
         logger.warning("api.eval_rejected_unknown_model model={}", body.student_lm)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown model {body.student_lm!r}. Choose from GET /api/models.",
-        )
+        raise
 
     try:
         require_openai_api_key()
@@ -236,4 +279,68 @@ def start_eval(body: StartEvalRequest) -> dict:
     }
     job = start_eval_job(params)
     logger.info("api.eval_accepted job_id={} model={}", job.id, body.student_lm)
+    return {"job": job.to_dict()}
+
+
+@app.post("/api/optimize", status_code=202)
+def start_optimize(body: StartOptimizeRequest) -> dict:
+    try:
+        _validate_model(body.student_lm, field_name="student_lm")
+        _validate_model(body.teacher_lm, field_name="teacher_lm")
+    except HTTPException as exc:
+        logger.warning("api.optimize_rejected_unknown_model detail={}", exc.detail)
+        raise
+
+    try:
+        require_openai_api_key()
+    except ValueError as exc:
+        logger.error("api.optimize_rejected_missing_credentials")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Keep program saves under the repo (no path traversal).
+    save_path = Path(body.save)
+    if save_path.is_absolute() or ".." in save_path.parts:
+        raise HTTPException(
+            status_code=400,
+            detail="save must be a relative path without '..' (e.g. artifacts/optimized_react.json)",
+        )
+
+    logger.info(
+        "api.optimize_request student={} teacher={} backend={} auto={} "
+        "train_size={} dev_size={} max_iters={} bootstrapped={} labeled={} save={}",
+        body.student_lm,
+        body.teacher_lm,
+        body.backend,
+        body.auto,
+        body.train_size,
+        body.dev_size,
+        body.max_iters,
+        body.max_bootstrapped_demos,
+        body.max_labeled_demos,
+        body.save,
+    )
+    params = {
+        "student_lm": body.student_lm,
+        "teacher_lm": body.teacher_lm,
+        "backend": body.backend,
+        "train_size": body.train_size,
+        "dev_size": body.dev_size,
+        "max_iters": body.max_iters,
+        "num_threads": body.num_threads,
+        "safe": body.safe,
+        "temperature": body.temperature,
+        "auto": body.auto,
+        "max_bootstrapped_demos": body.max_bootstrapped_demos,
+        "max_labeled_demos": body.max_labeled_demos,
+        "save": body.save,
+        "notes": f"Triggered from UI · MIPROv2 · {body.student_lm}",
+    }
+    job = start_optimize_job(params)
+    logger.info(
+        "api.optimize_accepted job_id={} student={} teacher={} auto={}",
+        job.id,
+        body.student_lm,
+        body.teacher_lm,
+        body.auto,
+    )
     return {"job": job.to_dict()}

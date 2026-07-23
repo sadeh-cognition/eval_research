@@ -126,9 +126,54 @@ body,
   background: var(--panel-2);
 }
 
+.panel-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+
 .run-eval h3 {
   margin: 0 0 0.25rem;
   font-size: 0.95rem;
+}
+
+.opt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+  margin: 0.75rem 0;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.linkish {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.badge-baseline {
+  color: var(--low);
+  border-color: #3d5a8a;
+}
+
+.badge-opt-base {
+  color: var(--mid);
+  border-color: #8a6b1f;
+}
+
+.badge-opt-after {
+  color: var(--good);
+  border-color: #2f7a55;
 }
 
 .run-form {

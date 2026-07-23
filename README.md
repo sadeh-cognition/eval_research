@@ -139,8 +139,9 @@ cd frontend && npm install && npm run dev
 
 Open http://localhost:5173
 
-- **Run evaluation** form: pick a model from the dropdown, set dev size / backend, start eval
+- **Evaluate / Optimize** tabs: baseline eval or MIPROv2 (student + teacher, `auto` budget)
 - Sidebar history of all persisted runs (auto-refreshes when a UI job finishes)
+- Optimize jobs write linked `optimize_baseline` + `optimize_after` runs (with Δ and program path)
 - Aggregate metrics + config
 - Filter examples (all / perfect / partial / failed)
 - Drill into gold vs predicted titles, reasoning, trajectory
@@ -154,6 +155,7 @@ API endpoints:
 | GET | `/api/runs` | List run summaries (newest first) |
 | GET | `/api/runs/{id}` | Full run with per-example results |
 | POST | `/api/evals` | Start background eval (`student_lm`, sizes, …) |
+| POST | `/api/optimize` | Start background MIPROv2 (student + teacher, `auto`, …) |
 | GET | `/api/jobs/{id}` | Poll job status |
 
 Legacy `artifacts/eval_results.json` is imported into history on API startup if present.
@@ -162,14 +164,17 @@ Legacy `artifacts/eval_results.json` is imported into history on API startup if 
 
 ```
 src/react_hover/
-  data.py      # HoVer load + split
-  tools.py     # ColBERT / Wikipedia tools
-  metric.py    # top5_recall
-  agent.py     # dspy.ReAct builder
-  history.py   # disk-backed eval run store
-  run.py       # CLI: demo | evaluate | optimize
-  api.py       # FastAPI for eval history
-frontend/      # React (Vite + TypeScript) review UI
+  data.py         # HoVer load + split
+  tools.py        # ColBERT / Wikipedia tools
+  metric.py       # top5_recall
+  agent.py        # dspy.ReAct builder
+  eval_runner.py  # shared baseline eval
+  opt_runner.py   # shared MIPROv2 optimize
+  history.py      # disk-backed eval run store
+  jobs.py         # background eval/optimize jobs
+  run.py          # CLI: demo | evaluate | optimize
+  api.py          # FastAPI for eval history + jobs
+frontend/         # React (Vite + TypeScript) review UI
 artifacts/evals/  # persisted eval history
 ```
 
